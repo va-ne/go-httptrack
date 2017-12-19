@@ -17,17 +17,17 @@ type Track struct {
 	request               *http.Request
 	isReused              bool
 	isTLS                 bool
-	DNSStart              time.Time
-	DNSDone               time.Time
+	dnsStart              time.Time
+	dnsDone               time.Time
 	DNSLookout            time.Duration
-	TCPStart              time.Time
-	TCPDone               time.Time
-	TCPConnection         time.Duration
-	TLSHandshakeStart     time.Time
-	TLSHandshakeDone      time.Time
+	connStart             time.Time
+	connDone              time.Time
+	Connect               time.Duration
+	tlsHandshakeStart     time.Time
+	tlsHandshakeDone      time.Time
 	TLSHandshake          time.Duration
-	ServerProcessingStart time.Time
-	ServerProcessingDone  time.Time
+	serverProcessingStart time.Time
+	serverProcessingDone  time.Time
 	ServerProcessing      time.Duration
 	Total                 time.Duration
 }
@@ -38,95 +38,92 @@ func (t *Track) RoundTrip(req *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(req)
 }
 
-func (t *Track) getConn(info httptrace.GotConnInfo) {
+func (t *Track) getConnHandler(info httptrace.GotConnInfo) {
 	fmt.Println("getConn...")
 
 	t.isReused = info.Reused
 }
 
-func (t *Track) dnsStart(info httptrace.DNSStartInfo) {
+func (t *Track) dnsStartHandler(info httptrace.DNSStartInfo) {
 	fmt.Println("dnsStart...")
 
-	t.DNSStart = time.Now()
+	t.dnsStart = time.Now()
 }
 
-func (t *Track) dnsDone(info httptrace.DNSDoneInfo) {
+func (t *Track) dnsDoneHandler(info httptrace.DNSDoneInfo) {
 	fmt.Println("dnsDone...")
 
-	t.DNSDone = time.Now()
-	t.DNSLookout = t.DNSDone.Sub(t.DNSStart)
+	t.dnsDone = time.Now()
+	t.DNSLookout = t.dnsDone.Sub(t.dnsStart)
 }
 
-func (t *Track) connectStart(_, _ string) {
+func (t *Track) connectStartHandler(_, _ string) {
 	fmt.Println("connectStart...")
 
-	t.TCPStart = time.Now()
+	t.connStart = time.Now()
 }
 
-func (t *Track) connectDone(network, addr string, err error) {
+func (t *Track) connectDoneHandler(network, addr string, err error) {
 	fmt.Println("connectDone...")
 
-	t.TCPDone = time.Now()
-	t.TCPConnection = t.TCPDone.Sub(t.TCPStart)
+	t.connDone = time.Now()
+	t.Connect = t.connDone.Sub(t.connStart)
 }
 
-func (t *Track) tlsHandshakeStart() {
+func (t *Track) tlsHandshakeStartHandler() {
 	fmt.Println("tlsHandshakeStart...")
 
-	t.TLSHandshakeStart = time.Now()
+	t.tlsHandshakeStart = time.Now()
 	t.isTLS = true
 }
 
-func (t *Track) tlsHandshakeDone(_ tls.ConnectionState, _ error) {
+func (t *Track) tlsHandshakeDoneHandler(_ tls.ConnectionState, _ error) {
 	fmt.Println("tlsHandshakeDone...")
 
-	t.TLSHandshakeDone = time.Now()
-	t.TLSHandshake = t.TLSHandshakeDone.Sub(t.TLSHandshakeStart)
+	t.tlsHandshakeDone = time.Now()
+	t.TLSHandshake = t.tlsHandshakeDone.Sub(t.tlsHandshakeStart)
 
 }
 
-func (t *Track) wroteRequest(info httptrace.WroteRequestInfo) {
+func (t *Track) wroteRequestHandler(info httptrace.WroteRequestInfo) {
 	fmt.Println("wroteRequest...")
 
-	t.ServerProcessingStart = time.Now()
+	t.serverProcessingStart = time.Now()
 }
 
-func (t *Track) gotFirstResponseByte() {
+func (t *Track) gotFirstResponseByteHandler() {
 	fmt.Println("gotFirstResponseByte...")
 
-	t.ServerProcessingDone = time.Now()
-	t.ServerProcessing = t.ServerProcessingDone.Sub(t.ServerProcessingStart)
+	t.serverProcessingDone = time.Now()
+	t.ServerProcessing = t.serverProcessingDone.Sub(t.serverProcessingStart)
 
-	// Check if total should be calc here
-	t.Total = t.ServerProcessingDone.Sub(t.DNSStart)
-}
-
-func withClientTrace(ctx context.Context, t *Track) context.Context {
-	return httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
-		DNSStart:             t.dnsStart,
-		DNSDone:              t.dnsDone,
-		ConnectStart:         t.connectStart,
-		ConnectDone:          t.connectDone,
-		TLSHandshakeStart:    t.tlsHandshakeStart,
-		TLSHandshakeDone:     t.tlsHandshakeDone,
-		GotConn:              t.getConn,
-		WroteRequest:         t.wroteRequest,
-		GotFirstResponseByte: t.gotFirstResponseByte,
-	})
+	t.Total = t.serverProcessingDone.Sub(t.dnsStart)
 }
 
 // WithHTTPTrack - a wrapper of httptrace.WithClientTrace. It records the
 // time of each httptrace hooks.
 func WithHTTPTrack(ctx context.Context, t *Track) context.Context {
-	return withClientTrace(ctx, t)
+	return httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		DNSStart:             t.dnsStartHandler,
+		DNSDone:              t.dnsDoneHandler,
+		ConnectStart:         t.connectStartHandler,
+		ConnectDone:          t.connectDoneHandler,
+		TLSHandshakeStart:    t.tlsHandshakeStartHandler,
+		TLSHandshakeDone:     t.tlsHandshakeDoneHandler,
+		GotConn:              t.getConnHandler,
+		WroteRequest:         t.wroteRequestHandler,
+		GotFirstResponseByte: t.gotFirstResponseByteHandler,
+	})
 }
 
-func (t Track) Print() {
-	fmt.Println("DNSLookout: ", t.DNSLookout)
-	fmt.Println("TCPConnection: ", t.TCPConnection)
-	fmt.Println("TLSHandshake: ", t.TLSHandshake)
-	fmt.Println("ServerProcessing: ", t.ServerProcessing)
-	fmt.Println("Total: ", t.Total)
+func (t Track) durations() map[string]time.Duration {
+	return map[string]time.Duration{
+		"DNSLookout":       t.DNSLookout,
+		"Connect":          t.Connect,
+		"TLSHandshake":     t.TLSHandshake,
+		"ServerProcessing": t.ServerProcessing,
+		"Total":            t.Total,
+	}
 }
 
 func main() {
@@ -154,5 +151,5 @@ func main() {
 	}
 	res.Body.Close()
 
-	result.Print()
+	fmt.Printf("%+v\n", result.durations())
 }
