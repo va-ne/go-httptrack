@@ -1,0 +1,15 @@
+language: go
+sudo: false
+
+go:
+  - 1.8
+  - tip
+
+os:
+  - linux
+
+install:
+  - echo "skip install"
+
+script:
+  - go test -v ./...
